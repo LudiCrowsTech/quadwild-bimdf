@@ -1,0 +1,28 @@
+{
+  "engine": {
+    "version": "20261026-8ef2856",
+    "adapter": 1,
+    "notes": "Upstream e722c7e, build 20261026-8ef2856",
+    "commit": "8ef285605417b752695b079cc7faf92468720f81",
+    "upstream_commit": "e722c7e961982cf61db7c10812329dd0fc7d60df",
+    "date": "2026-10-26T16:00:32Z",
+    "platforms": {
+      "win-x64": {
+        "url": "https://github.com/LudiCrowsTech/quadwild-bimdf/releases/download/lct-20261026-8ef2856/ariadne-engine-win-x64.zip",
+        "sha256": "102da1e30a7a1c7728dcfa5eb961db34e65fcb2ac18f92b89e6b08caeafcfeb0"
+      },
+      "linux-x64": {
+        "url": "https://github.com/LudiCrowsTech/quadwild-bimdf/releases/download/lct-20261026-8ef2856/ariadne-engine-linux-x64.zip",
+        "sha256": "b7cd8ec047826b3a533f2a28c8d0654f23486425a63753749a857116e1698e5d"
+      },
+      "macos-arm64": {
+        "url": "https://github.com/LudiCrowsTech/quadwild-bimdf/releases/download/lct-20261026-3b86aa0/ariadne-engine-macos-universal.zip",
+        "sha256": "4912b7b3cf88e9db0e463341ca5f0e775816f56811d0bc6da27cde7d54a287fe"
+      },
+      "macos-x64": {
+        "url": "https://github.com/LudiCrowsTech/quadwild-bimdf/releases/download/lct-20261026-3b86aa0/ariadne-engine-macos-universal.zip",
+        "sha256": "4912b7b3cf88e9db0e463341ca5f0e775816f56811d0bc6da27cde7d54a287fe"
+      }
+    }
+  }
+}
