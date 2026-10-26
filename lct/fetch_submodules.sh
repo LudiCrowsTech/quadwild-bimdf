@@ -39,3 +39,12 @@ if ! git submodule update --init --recursive --depth 1; then
   git submodule update --init --recursive || exit 1
 fi
 git submodule status --recursive
+# fail early (clear message) if any submodule ended up empty
+missing=$(git submodule status --recursive | awk '$1 ~ /^-/ {print $2}')
+for p in $(git config -f .gitmodules --get-regexp '\.path$' | awk '{print $2}'); do
+  [ -n "$(ls -A "$p" 2>/dev/null)" ] || missing="$missing $p"
+done
+if [ -n "$(echo $missing)" ]; then
+  echo "::error::Submodules not fetched:$missing"
+  exit 1
+fi

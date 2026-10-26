@@ -111,7 +111,7 @@ jobs:
 
       # RWTH GitLab hosts some submodules and is often unreachable: try mirrors.
       - name: Fetch submodules
-        run: bash lct/fetch_submodules.sh
+        run: bash lct/fetch_submodules.sh || (sleep 30 && bash lct/fetch_submodules.sh)
 
       # Build commands follow the upstream workflow (.github/workflows/build.yaml).
       - name: Build (Linux)
