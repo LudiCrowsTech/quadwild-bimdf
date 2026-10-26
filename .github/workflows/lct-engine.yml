@@ -99,7 +99,7 @@ jobs:
         include:
           - { os: ubuntu-22.04, plat: linux-x64, py: python3, bindir: build/Build/bin }
           - { os: windows-2022, plat: win-x64, py: python, bindir: build/Build/bin/Release }
-          - { os: macos-14, plat: macos-universal, py: python3, bindir: build/Build/bin }
+          - { os: macos-latest, plat: macos-universal, py: python3, bindir: build/Build/bin }
     runs-on: ${{ matrix.os }}
     defaults:
       run:
