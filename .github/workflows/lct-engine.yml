@@ -189,6 +189,7 @@ jobs:
           name: engine-${{ matrix.plat }}
           path: ariadne-engine-${{ matrix.plat }}.zip
           if-no-files-found: error
+          retention-days: 3  # only needed until the release job runs
 
   # ------------------------------------------------------------- release
   release:
