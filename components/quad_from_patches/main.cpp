@@ -52,6 +52,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <quadretopology/qr_eval_quantization_json.h>
 
 #include <iostream>
+#include <cmath>
+#include <fstream>
 
 #ifdef _WIN32
 #  include <windows.h>
@@ -116,9 +118,9 @@ int actual_main(int argc, char *argv[])
 //    parameters.repeatLosingConstraintsNonQuads = false;
 //    parameters.repeatLosingConstraintsAlign = true;
 //    parameters.hardParityConstraint = true; //Flag to choose if use hard constraints or not
-    if(argc<2 || argc > 5)
+    if(argc<2 || argc > 6)
     {
-        std::cerr << "usage: " << argv[0] << " <input.obj> [num] [setup.txt] [out_stats.json]"
+        std::cerr << "usage: " << argv[0] << " <input.obj> [num] [setup.txt] [out_stats.json] [patch_scale.txt]"
                   << std::endl;
         exit(1);
     }
@@ -134,6 +136,10 @@ int actual_main(int argc, char *argv[])
     std::string json_filename = "";
     if (argc>4) {
         json_filename = argv[4];
+    }
+    std::string patchScaleFilename = "";
+    if (argc>5) {
+        patchScaleFilename = argv[5];
     }
     QuadRetopology::Parameters parameters;
     float scaleFactor;
@@ -203,7 +209,30 @@ int actual_main(int argc, char *argv[])
     QuadRetopology::internal::updateAllMeshAttributes(trimesh);
     double EdgeSize=avgEdge(trimesh)*scaleFactor;
     std::cout<<"Edge Size "<<EdgeSize<<std::endl;
-    const std::vector<double> edgeFactor(trimeshPartitions.size(), EdgeSize);
+    std::vector<double> edgeFactor(trimeshPartitions.size(), EdgeSize);
+    if (!patchScaleFilename.empty())
+    {
+        //Optional per-patch multiplier of the edge size (one float per patch, in .patch order)
+        std::ifstream scaleIn(patchScaleFilename.c_str());
+        std::vector<double> mult;
+        double m;
+        while (scaleIn >> m)
+            mult.push_back(m);
+        bool valid = scaleIn.eof() && mult.size() == trimeshPartitions.size();
+        for (size_t i = 0; valid && i < mult.size(); i++)
+            valid = std::isfinite(mult[i]) && mult[i] > 0.0;
+        if (valid)
+        {
+            for (size_t i = 0; i < mult.size(); i++)
+                edgeFactor[i] = EdgeSize * mult[i];
+            std::cout<<"Using per-patch edge scale from "<<patchScaleFilename<<std::endl;
+        }
+        else
+        {
+            std::cerr<<"WARNING: invalid patch scale file "<<patchScaleFilename<<" ("<<mult.size()
+                     <<" values for "<<trimeshPartitions.size()<<" patches), using a constant edge size"<<std::endl;
+        }
+    }
     auto qfp_result = qfp::quadrangulationFromPatches(trimesh, trimeshPartitions, trimeshCorners, edgeFactor, parameters, fixedChartClusters, quadmesh, quadmeshPartitions, quadmeshCorners, ilpResult);
 
 
