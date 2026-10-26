@@ -108,7 +108,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.sync.outputs.sha }}
-          submodules: recursive
+
+      # RWTH GitLab hosts some submodules and is often unreachable: try mirrors.
+      - name: Fetch submodules
+        run: bash lct/fetch_submodules.sh
 
       # Build commands follow the upstream workflow (.github/workflows/build.yaml).
       - name: Build (Linux)
