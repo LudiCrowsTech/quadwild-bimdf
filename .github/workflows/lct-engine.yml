@@ -1,0 +1,258 @@
+# LCT Engine: keep the fork in sync with upstream cgg-bern/quadwild-bimdf,
+# build quadwild + quad_from_patches on 3 platforms, run a regression test,
+# publish a GitHub release and update manifest.json (branch "manifest").
+name: LCT Engine
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Build and release even if upstream has no new commits"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lct-engine
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_URL: https://github.com/cgg-bern/quadwild-bimdf
+  UPSTREAM_BRANCH: main
+
+jobs:
+  # ---------------------------------------------------------------- sync
+  sync:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.decide.outputs.should_build }}
+      sha: ${{ steps.decide.outputs.sha }}
+      short: ${{ steps.decide.outputs.short }}
+      date: ${{ steps.decide.outputs.date }}
+      upstream_sha: ${{ steps.decide.outputs.upstream_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge new upstream commits
+        id: merge
+        run: |
+          set -eu
+          git config user.name "LCT Engine Bot"
+          git config user.email "lct-engine-bot@users.noreply.github.com"
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch upstream "$UPSTREAM_BRANCH"
+          NEW=$(git rev-list --count HEAD..upstream/"$UPSTREAM_BRANCH")
+          echo "New upstream commits: $NEW"
+          MERGED=false
+          if [ "$NEW" -gt 0 ]; then
+            if ! git merge --no-edit -m "Merge upstream $UPSTREAM_BRANCH" upstream/"$UPSTREAM_BRANCH"; then
+              git merge --abort || true
+              echo "::error::Merge conflict with upstream. Resolve it manually in the fork (merge upstream/$UPSTREAM_BRANCH locally), then re-run this workflow."
+              exit 1
+            fi
+            if ! git push; then
+              echo "::error::Push failed. If upstream changed files under .github/workflows, GitHub refuses pushes with the default token. Merge upstream manually once, then re-run."
+              exit 1
+            fi
+            MERGED=true
+          fi
+          echo "merged=$MERGED" >> "$GITHUB_OUTPUT"
+
+      - name: Decide whether to build
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          MERGED: ${{ steps.merge.outputs.merged }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -eu
+          SHA=$(git rev-parse HEAD)
+          UP=$(git rev-parse upstream/"$UPSTREAM_BRANCH")
+          EXISTING=$(gh release list --limit 200 --json tagName --jq '.[].tagName' | grep -c '^lct-' || true)
+          SHOULD=false
+          if [ "$MERGED" = "true" ] || [ "$FORCE" = "true" ] || [ "$EXISTING" -eq 0 ]; then
+            SHOULD=true
+          fi
+          echo "merged=$MERGED force=$FORCE existing_lct_releases=$EXISTING -> should_build=$SHOULD"
+          {
+            echo "should_build=$SHOULD"
+            echo "sha=$SHA"
+            echo "short=${SHA:0:7}"
+            echo "date=$(date -u +%Y%m%d)"
+            echo "upstream_sha=$UP"
+          } >> "$GITHUB_OUTPUT"
+
+  # --------------------------------------------------------------- build
+  build:
+    needs: sync
+    if: needs.sync.outputs.should_build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04, plat: linux-x64, py: python3, bindir: build/Build/bin }
+          - { os: windows-2022, plat: win-x64, py: python, bindir: build/Build/bin/Release }
+          - { os: macos-14, plat: macos-universal, py: python3, bindir: build/Build/bin }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.sync.outputs.sha }}
+          submodules: recursive
+
+      # Build commands follow the upstream workflow (.github/workflows/build.yaml).
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+          cmake . -GNinja -B build -DCMAKE_BUILD_TYPE=Release -DSATSUMA_ENABLE_BLOSSOM5=0 \
+            -DCMAKE_EXE_LINKER_FLAGS="-static" -DBLA_STATIC=1 -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
+          cmake --build build
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cmake . -B build -T ClangCl -DSATSUMA_ENABLE_BLOSSOM5=0 -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
+          cmake --build build --config Release
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install ninja
+          cmake . -GNinja -B build -DCMAKE_BUILD_TYPE=Release -DSATSUMA_ENABLE_BLOSSOM5=0 \
+            -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+          cmake --build build
+
+      - name: Stage engine folder
+        run: |
+          set -eu
+          mkdir -p stage/engine
+          for b in quadwild quad_from_patches; do
+            if [ -f "${{ matrix.bindir }}/$b.exe" ]; then cp "${{ matrix.bindir }}/$b.exe" stage/engine/
+            else cp "${{ matrix.bindir }}/$b" stage/engine/; fi
+          done
+          chmod +x stage/engine/quadwild* stage/engine/quad_from_patches* || true
+          cp -r config stage/engine/config
+          cp LICENSE stage/engine/LICENSE
+          {
+            echo "Source:   https://github.com/LudiCrowsTech/quadwild-bimdf"
+            echo "Commit:   ${{ needs.sync.outputs.sha }}"
+            echo "Upstream: https://github.com/cgg-bern/quadwild-bimdf (commit ${{ needs.sync.outputs.upstream_sha }})"
+            echo "License:  GPL-3.0 (see LICENSE)"
+          } > stage/engine/SOURCE.txt
+          ls -la stage/engine
+
+      - name: Regression test
+        run: |
+          ${{ matrix.py }} lct/regress.py --bin stage/engine --config config \
+            --out stage/engine/metrics.json --commit ${{ needs.sync.outputs.sha }}
+
+      - name: Package zip
+        run: |
+          ${{ matrix.py }} - <<'PY'
+          import os, zipfile
+          out = "ariadne-engine-${{ matrix.plat }}.zip"
+          with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+              for root, _, files in os.walk("stage/engine"):
+                  for f in sorted(files):
+                      p = os.path.join(root, f)
+                      # write() keeps unix permission bits (executables)
+                      z.write(p, os.path.relpath(p, "stage").replace(os.sep, "/"))
+          print("created", out, os.path.getsize(out), "bytes")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine-${{ matrix.plat }}
+          path: ariadne-engine-${{ matrix.plat }}.zip
+          if-no-files-found: error
+
+  # ------------------------------------------------------------- release
+  release:
+    needs: [sync, build]
+    runs-on: ubuntu-latest
+    # Giovanni: to approve each release by hand, add "Required reviewers" to the
+    # "release" environment (repo Settings > Environments). Without reviewers
+    # this job runs automatically.
+    environment: release
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: lct-${{ needs.sync.outputs.date }}-${{ needs.sync.outputs.short }}
+      VERSION: ${{ needs.sync.outputs.date }}-${{ needs.sync.outputs.short }}
+      SHA: ${{ needs.sync.outputs.sha }}
+      UPSTREAM_SHA: ${{ needs.sync.outputs.upstream_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.sync.outputs.sha }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: engine-*
+          path: dist
+          merge-multiple: true
+
+      - name: Write release notes
+        run: |
+          ls -la dist
+          python3 - <<'PY'
+          import json, os, zipfile
+          with zipfile.ZipFile("dist/ariadne-engine-linux-x64.zip") as z:
+              m = json.loads(z.read("engine/metrics.json"))
+          lines = ["Automated QuadWild engine build for the LCT Ariadne add-on.", "",
+                   "- Fork commit: `%s`" % os.environ["SHA"],
+                   "- Upstream (cgg-bern/quadwild-bimdf %s): `%s`" % (os.environ.get("UPSTREAM_BRANCH", "main"), os.environ["UPSTREAM_SHA"]),
+                   "- macOS: one universal zip (arm64 + x86_64)", "",
+                   "Regression metrics (linux-x64):", "",
+                   "| mesh | faces | quad % | irregular | seconds |", "|---|---|---|---|---|"]
+          for n, v in m["meshes"].items():
+              lines.append("| %s | %d | %.1f | %d | %.1f |" % (n, v["faces"], v["quad_pct"], v["irregular"], v["seconds"]))
+          open("notes.md", "w").write("\n".join(lines) + "\n")
+          PY
+          cat notes.md
+
+      - name: Create GitHub release
+        run: |
+          set -eu
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists (re-run); replacing it."
+            gh release delete "$TAG" --cleanup-tag --yes
+          fi
+          gh release create "$TAG" dist/*.zip \
+            --title "Engine $VERSION" --notes-file notes.md --target "$SHA"
+
+      - name: Build manifest.json
+        run: |
+          python3 lct/make_manifest.py --tag "$TAG" --version "$VERSION" \
+            --repo "$GH_REPO" --commit "$SHA" --upstream-commit "$UPSTREAM_SHA" \
+            --assets-dir dist --notes "Upstream ${UPSTREAM_SHA:0:7}, build $VERSION" \
+            --out "$RUNNER_TEMP/manifest.json"
+          cat "$RUNNER_TEMP/manifest.json"
+
+      # The "manifest" branch holds only manifest.json. It is recreated as a
+      # fresh single-commit orphan branch each time and force-pushed.
+      - name: Publish manifest branch
+        run: |
+          set -eu
+          D="$RUNNER_TEMP/manifest-repo"
+          mkdir -p "$D" && cd "$D"
+          git init -q
+          git checkout -q --orphan manifest
+          git config user.name "LCT Engine Bot"
+          git config user.email "lct-engine-bot@users.noreply.github.com"
+          cp "$RUNNER_TEMP/manifest.json" manifest.json
+          git add manifest.json
+          git commit -q -m "Engine manifest $VERSION"
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GH_REPO}.git" manifest:refs/heads/manifest
