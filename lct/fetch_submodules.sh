@@ -34,9 +34,21 @@ if ! reach "${BASE}cmake/cmake-library.git"; then
 fi
 
 git submodule sync --recursive
-if ! git submodule update --init --recursive --depth 1; then
+annotate() {  # show the tail of a log as one error annotation (raw logs are hard to reach)
+  printf '::error title=%s::%s\n' "$1" "$(tail -n 25 "$2" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+}
+if ! git submodule update --init --recursive --depth 1 > sub1.log 2>&1; then
+  cat sub1.log
   echo "== shallow fetch failed, retrying full"
-  git submodule update --init --recursive || exit 1
+  if ! git submodule update --init --recursive > sub2.log 2>&1; then
+    cat sub2.log
+    annotate "submodule shallow" sub1.log
+    annotate "submodule full" sub2.log
+    exit 1
+  fi
+  cat sub2.log
+else
+  cat sub1.log
 fi
 git submodule status --recursive
 # fail early (clear message) if any submodule ended up empty
