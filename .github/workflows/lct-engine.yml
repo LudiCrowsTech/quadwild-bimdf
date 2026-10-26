@@ -119,23 +119,32 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build
-          cmake . -GNinja -B build -DCMAKE_BUILD_TYPE=Release -DSATSUMA_ENABLE_BLOSSOM5=0 \
-            -DCMAKE_EXE_LINKER_FLAGS="-static" -DBLA_STATIC=1 -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
-          cmake --build build
+          set -o pipefail
+          { cmake . -GNinja -B build -DCMAKE_BUILD_TYPE=Release -DSATSUMA_ENABLE_BLOSSOM5=0 \
+              -DCMAKE_EXE_LINKER_FLAGS="-static" -DBLA_STATIC=1 -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
+            && cmake --build build; } 2>&1 | tee build.log
 
       - name: Build (Windows)
         if: runner.os == 'Windows'
         run: |
-          cmake . -B build -T ClangCl -DSATSUMA_ENABLE_BLOSSOM5=0 -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
-          cmake --build build --config Release
+          set -o pipefail
+          { cmake . -B build -T ClangCl -DSATSUMA_ENABLE_BLOSSOM5=0 -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
+            && cmake --build build --config Release; } 2>&1 | tee build.log
 
       - name: Build (macOS)
         if: runner.os == 'macOS'
         run: |
           brew install ninja
-          cmake . -GNinja -B build -DCMAKE_BUILD_TYPE=Release -DSATSUMA_ENABLE_BLOSSOM5=0 \
-            -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
-          cmake --build build
+          set -o pipefail
+          { cmake . -GNinja -B build -DCMAKE_BUILD_TYPE=Release -DSATSUMA_ENABLE_BLOSSOM5=0 \
+              -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
+            && cmake --build build; } 2>&1 | tee build.log
+
+      # Surface the build errors as annotations (readable without the raw log).
+      - name: Report build errors
+        if: failure()
+        run: |
+          ${{ matrix.py }} lct/report_errors.py build.log
 
       - name: Stage engine folder
         run: |
