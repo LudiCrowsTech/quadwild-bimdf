@@ -36,12 +36,24 @@ def main():
     ap.add_argument("--assets-dir", required=True)
     ap.add_argument("--notes", default="")
     ap.add_argument("--out", default="manifest.json")
+    ap.add_argument("--previous", default="", help="previous manifest.json: reused for platforms "
+                    "whose build is missing this time (e.g. macOS runner unavailable)")
     a = ap.parse_args()
 
+    prev = {}
+    if a.previous and os.path.isfile(a.previous):
+        try:
+            prev = json.load(open(a.previous)).get("engine", {}).get("platforms", {})
+        except ValueError:
+            prev = {}
     platforms = {}
     for plat, name in ZIPS.items():
         path = os.path.join(a.assets_dir, name)
         if not os.path.isfile(path):
+            if plat in prev:
+                print("missing asset %s: keeping previous %s build" % (name, plat), file=sys.stderr)
+                platforms[plat] = prev[plat]
+                continue
             print("missing asset: %s" % path, file=sys.stderr)
             return 1
         platforms[plat] = {

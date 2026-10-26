@@ -37,26 +37,25 @@ git submodule sync --recursive
 annotate() {  # show the tail of a log as one error annotation (raw logs are hard to reach)
   printf '::error title=%s::%s\n' "$1" "$(tail -n 25 "$2" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
 }
-if ! git submodule update --init --recursive --depth 1 > sub1.log 2>&1; then
-  cat sub1.log
-  echo "== shallow fetch failed, retrying full"
-  if ! git submodule update --init --recursive > sub2.log 2>&1; then
-    cat sub2.log
-    annotate "submodule shallow" sub1.log
-    annotate "submodule full" sub2.log
+populated() {  # submodule dir has real content (not only the .git link file)
+  [ -n "$(ls -A "$1" 2>/dev/null | grep -v '^\.git$')" ]
+}
+
+PATHS=$(git config -f .gitmodules --get-regexp '\.path$' | awk '{print $2}')
+for p in $PATHS; do
+  ok=0
+  for attempt in 1 2 3; do
+    if [ "$attempt" -eq 1 ]; then depth="--depth 1"; else depth=""; fi
+    if git submodule update --init --recursive $depth -- "$p" > sub.log 2>&1 && populated "$p"; then
+      ok=1; break
+    fi
+    cat sub.log
+    echo "== $p: attempt $attempt failed, retrying"
+    sleep $((attempt * 10))
+  done
+  if [ "$ok" -ne 1 ]; then
+    annotate "submodule $p" sub.log
     exit 1
   fi
-  cat sub2.log
-else
-  cat sub1.log
-fi
-git submodule status --recursive
-# fail early (clear message) if any submodule ended up empty
-missing=$(git submodule status --recursive | awk '$1 ~ /^-/ {print $2}')
-for p in $(git config -f .gitmodules --get-regexp '\.path$' | awk '{print $2}'); do
-  [ -n "$(ls -A "$p" 2>/dev/null)" ] || missing="$missing $p"
 done
-if [ -n "$(echo $missing)" ]; then
-  echo "::error::Submodules not fetched:$missing"
-  exit 1
-fi
+git submodule status --recursive
