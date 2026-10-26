@@ -46,11 +46,6 @@ if ! reach "${BASE}cmake/cmake-library.git"; then
   git config --global --add "url.${CMAKE_GH}.insteadOf" "${BASE}cmake/cmake-library.git"
 fi
 
-# Eigen: gitlab.com is often overloaded -> GitHub mirror if gitlab does not answer
-if ! reach "https://gitlab.com/libeigen/eigen.git"; then
-  git config --global "url.https://github.com/libigl/eigen.git.insteadOf" "https://gitlab.com/libeigen/eigen.git"
-fi
-
 git submodule sync --recursive
 annotate() {  # show the tail of a log as one error annotation (raw logs are hard to reach)
   printf '::error title=%s::%s\n' "$1" "$(tail -n 25 "$2" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
@@ -62,14 +57,14 @@ populated() {  # submodule dir has real content (not only the .git link file)
 PATHS=$(git config -f .gitmodules --get-regexp '\.path$' | awk '{print $2}')
 for p in $PATHS; do
   ok=0
-  for attempt in 1 2 3; do
+  for attempt in 1 2 3 4; do
     if [ "$attempt" -eq 1 ]; then depth="--depth 1"; else depth=""; fi
     if git submodule update --init --recursive $depth -- "$p" > sub.log 2>&1 && populated "$p"; then
       ok=1; break
     fi
     cat sub.log
     echo "== $p: attempt $attempt failed, retrying"
-    sleep $((attempt * 10))
+    sleep $((attempt * 30))
   done
   if [ "$ok" -ne 1 ]; then
     annotate "submodule $p" sub.log
